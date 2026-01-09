@@ -1,7 +1,11 @@
 {
   "pairs": [
     "BTCUSDT",
-    "ETHUSDT"
+    "BCHUSDT",
+    "PENGUUSDT",
+    "BROCCOLI714USDT",
+    "RVVUSDT",
+    "1000PEPEUSDT"
   ],
   "telegram_chat_id": "367456866"
 }
