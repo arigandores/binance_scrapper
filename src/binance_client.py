@@ -124,12 +124,16 @@ class BinanceClient:
 
     def _load_free_proxies(self, limit: int = 20, types: List[str] | None = None) -> List[str]:
         types = types or ["https"]
-        base_env = os.getenv("BINANCE_FREE_PROXY_URL_BASE")
-        base_url = base_env if base_env else "https://advanced.name/ru/freeproxy"
+        sources = {
+            "http": "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/http.txt",
+            "https": "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/https.txt",
+        }
         seen = set()
         proxies: List[str] = []
         for t in types:
-            url = f"{base_url}?type={t}"
+            url = sources.get(t)
+            if not url:
+                continue
             try:
                 self._dbg(f"Fetch proxy list: {url}")
                 resp = self.session.get(url, timeout=10)
@@ -137,13 +141,13 @@ class BinanceClient:
             except Exception as exc:
                 self._dbg(f"Proxy list fetch failed {url}: {exc}")
                 continue
-            candidates = re.findall(r"(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}", resp.text)
+            # Each line is host:port
+            candidates = [line.strip() for line in resp.text.splitlines() if ":" in line]
             self._dbg(f"Found {len(candidates)} raw proxies for type={t}")
             for p in candidates:
                 if p in seen:
                     continue
                 seen.add(p)
-                # use http schema for both, requests handles CONNECT for https targets
                 proxies.append(f"http://{p}")
                 if len(proxies) >= limit:
                     self._dbg(f"Collected proxy limit {len(proxies)}")
