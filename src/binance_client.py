@@ -250,3 +250,44 @@ class BinanceClient:
     def global_long_short(self, symbol: str) -> Dict:
         record = self._get_latest("/futures/data/globalLongShortAccountRatio", symbol)
         return self._parse_record(record)
+
+    def list_usdt_perpetual_symbols(self) -> List[str]:
+        """Return tradable USDT-margined perpetual symbols."""
+        data = self._request("/fapi/v1/exchangeInfo", {})
+        symbols = []
+        for item in data.get("symbols", []):
+            try:
+                if item.get("contractType") != "PERPETUAL":
+                    continue
+                if item.get("quoteAsset") != "USDT":
+                    continue
+                if item.get("status") != "TRADING":
+                    continue
+                symbol = item.get("symbol")
+                if symbol:
+                    symbols.append(str(symbol))
+            except Exception:
+                continue
+        return symbols
+
+    def all_24h_tickers(self) -> List[Dict]:
+        """Return 24h ticker stats for all symbols."""
+        data = self._request("/fapi/v1/ticker/24hr", {})
+        return data if isinstance(data, list) else []
+
+    def list_top_volume_usdt_perpetual(self, limit: int = 120) -> List[str]:
+        """Return top-N USDT perpetual symbols by quote volume (24h)."""
+        allowed = set(self.list_usdt_perpetual_symbols())
+        tickers = self.all_24h_tickers()
+        scored: List[tuple[str, float]] = []
+        for t in tickers:
+            try:
+                symbol = str(t.get("symbol", ""))
+                if symbol not in allowed:
+                    continue
+                vol = float(t.get("quoteVolume", 0.0))
+                scored.append((symbol, vol))
+            except Exception:
+                continue
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [s for s, _ in scored[:limit]]

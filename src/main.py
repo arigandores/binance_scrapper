@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .binance_client import BinanceClient
 from .config_loader import load_settings
@@ -10,10 +10,16 @@ from .report import build_message
 from .telegram_client import TelegramClient
 
 
-def collect_metrics(client: BinanceClient, symbols: List[str]) -> Tuple[List[Dict[str, object]], List[str]]:
+ProgressCb = Optional[Callable[[int, int, str, bool], None]]
+
+
+def collect_metrics(
+    client: BinanceClient, symbols: List[str], progress: ProgressCb = None
+) -> Tuple[List[Dict[str, object]], List[str]]:
     results: List[Dict[str, object]] = []
     errors: List[str] = []
-    for symbol in symbols:
+    total = len(symbols)
+    for idx, symbol in enumerate(symbols, start=1):
         try:
             accounts = client.top_trader_accounts(symbol)
             positions = client.top_trader_positions(symbol)
@@ -26,8 +32,12 @@ def collect_metrics(client: BinanceClient, symbols: List[str]) -> Tuple[List[Dic
                     "global": global_ratio,
                 }
             )
+            if progress:
+                progress(idx, total, symbol, False)
         except Exception as exc:  # pylint: disable=broad-except
             errors.append(f"{symbol}: {exc}")
+            if progress:
+                progress(idx, total, symbol, True)
     return results, errors
 
 
