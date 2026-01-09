@@ -3,34 +3,76 @@ from __future__ import annotations
 import os
 import time
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import requests
 
 BASE_URL = "https://fapi.binance.com"
+ALT_URL = "https://fapi.binance.me"  # часто работает при блоках
+
+
+def _build_base_urls(base_url: Optional[str]) -> List[str]:
+    env_list = os.getenv("BINANCE_BASE_URLS")
+    if env_list:
+        urls = [u.strip() for u in env_list.split(",") if u.strip()]
+    else:
+        single = base_url or os.getenv("BINANCE_BASE_URL")
+        urls = [single] if single else []
+    urls.append(BASE_URL)
+    urls.append(ALT_URL)
+    # preserve order, remove duplicates/empty
+    seen = set()
+    result = []
+    for url in urls:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        result.append(url)
+    return result
 
 
 class BinanceClient:
     def __init__(self, session: Optional[requests.Session] = None, base_url: Optional[str] = None) -> None:
-        self.base_url = base_url or os.getenv("BINANCE_BASE_URL", BASE_URL)
+        self.base_urls = _build_base_urls(base_url)
         self.session = session or requests.Session()
-        # Binance may return 451 without a User-Agent from some clouds (e.g. GH Actions)
-        self.session.headers.setdefault("User-Agent", "binance-ls-reporter/1.0 (+https://github.com)")
+        # Mimic a real browser to reduce 451 blocks on some clouds
+        browser_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Cache-Control": "max-age=0",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-User": "?1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-CH-UA": '"Chromium";v="120", "Not A(Brand";v="24", "Google Chrome";v="120"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"Windows"',
+        }
+        # Do not override user-provided headers; only set if missing
+        for key, value in browser_headers.items():
+            self.session.headers.setdefault(key, value)
 
     def _request(self, path: str, params: Dict) -> Dict:
-        url = f"{self.base_url}{path}"
         last_error = None
-        for attempt in range(3):
-            try:
-                resp = self.session.get(url, params=params, timeout=10)
-                if resp.status_code >= 400:
-                    resp.raise_for_status()
-                data = resp.json()
-                return data
-            except Exception as exc:  # pylint: disable=broad-except
-                last_error = exc
-                # small linear backoff
-                time.sleep(1 + attempt)
+        for base in self.base_urls:
+            url = f"{base}{path}"
+            for attempt in range(3):
+                try:
+                    resp = self.session.get(url, params=params, timeout=10)
+                    if resp.status_code >= 400:
+                        resp.raise_for_status()
+                    return resp.json()
+                except Exception as exc:  # pylint: disable=broad-except
+                    last_error = exc
+                    time.sleep(1 + attempt)
         raise last_error  # type: ignore[misc]
 
     def _get_latest(self, path: str, symbol: str) -> Dict:

@@ -59,6 +59,7 @@ python -m src.main
 - `TELEGRAM_BOT_TOKEN` (обязательная)
 - `TELEGRAM_CHAT_ID` (обязательная, если не указана в config)
 - `PAIRS` (опционально, переопределяет пары из config)
+- `BINANCE_BASE_URLS` (опционально) — список через запятую для обхода 451, например: `https://fapi.binance.me,https://fapi.binance.com`. Можно задать одиночную `BINANCE_BASE_URL`.
 
 ## Отладка
 - Если запрос к Binance вернул пустой ответ, скрипт завершится с ошибкой.
