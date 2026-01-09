@@ -167,20 +167,6 @@ class BinanceClient:
                         # retry/backoff handled by HTTPAdapter; loop moves to next proxy/base
         raise last_error  # type: ignore[misc]
 
-    def _proxy_test_url(self) -> str:
-        base = self.preferred_base or (self.base_urls[0] if self.base_urls else BASE_URL)
-        return f"{base}/fapi/v1/ping"
-
-    def _is_proxy_alive(self, proxy: str, timeout: float) -> bool:
-        test_url = self._proxy_test_url()
-        try:
-            resp = self.session.get(test_url, timeout=timeout, proxies={"https": proxy, "http": proxy})
-            resp.raise_for_status()
-            return True
-        except Exception as exc:  # pylint: disable=broad-except
-            self._dbg(f"Proxy check failed {proxy}: {exc}")
-            return False
-
     def _load_free_proxies(self, limit: int = 20, types: List[str] | None = None) -> List[str]:
         types = types or ["https"]
         sources = {
@@ -190,10 +176,8 @@ class BinanceClient:
         custom_proxy_url = os.getenv("BINANCE_FREE_PROXY_URL")
         if custom_proxy_url:
             sources["https"] = custom_proxy_url
-        validate = os.getenv("BINANCE_FREE_PROXY_VALIDATE", "1").lower() in ("1", "true", "yes")
-        validate_timeout = float(os.getenv("BINANCE_FREE_PROXY_VALIDATE_TIMEOUT", "1.5"))
         seen = set()
-        proxies: List[str] = []
+        raw_proxies: List[str] = []
         for t in types:
             url = sources.get(t)
             if not url:
@@ -213,12 +197,10 @@ class BinanceClient:
                     continue
                 seen.add(p)
                 proxy_url = f"http://{p}"
-                if validate and not self._is_proxy_alive(proxy_url, timeout=validate_timeout):
-                    continue
-                proxies.append(proxy_url)
-                if len(proxies) >= limit:
-                    self._dbg(f"Collected proxy limit {len(proxies)}")
-                    return proxies
+                raw_proxies.append(proxy_url)
+        proxies = raw_proxies[:limit]
+        if proxies:
+            self._dbg(f"Collected {len(proxies)} free proxies (no prevalidation, lazy fallback in _request)")
         return proxies
 
     def _dbg(self, msg: str) -> None:
