@@ -39,6 +39,12 @@ class BinanceClient:
         # Debug flag
         self.debug = os.getenv("BINANCE_DEBUG", "").lower() in ("1", "true", "yes")
 
+        # Optional TLS verify control (not recommended in prod; use only if CA issues)
+        tls_insecure = os.getenv("BINANCE_TLS_INSECURE", "").lower() in ("1", "true", "yes")
+        if tls_insecure:
+            self.session.verify = False
+            self._dbg("TLS verification disabled (BINANCE_TLS_INSECURE)")
+
         # Optional proxy (e.g., BINANCE_PROXY or HTTPS_PROXY). Using env allows GH Actions/secrets.
         proxy = (
             os.getenv("BINANCE_PROXY")
@@ -118,7 +124,8 @@ class BinanceClient:
 
     def _load_free_proxies(self, limit: int = 20, types: List[str] | None = None) -> List[str]:
         types = types or ["https"]
-        base_url = os.getenv("BINANCE_FREE_PROXY_URL_BASE", "https://advanced.name/ru/freeproxy")
+        base_env = os.getenv("BINANCE_FREE_PROXY_URL_BASE")
+        base_url = base_env if base_env else "https://advanced.name/ru/freeproxy"
         seen = set()
         proxies: List[str] = []
         for t in types:
