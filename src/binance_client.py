@@ -64,6 +64,8 @@ class BinanceClient:
             t.strip() for t in os.getenv("BINANCE_FREE_PROXY_TYPES", "https,http").split(",") if t.strip()
         ]
         self.free_proxies: List[str] = []
+        self.preferred_proxy: Optional[str] = None
+        self.preferred_base: Optional[str] = None
         if self.use_free_proxies:
             try:
                 self.free_proxies = self._load_free_proxies(limit=self.free_proxy_limit, types=self.free_proxy_types)
@@ -107,9 +109,17 @@ class BinanceClient:
         max_attempts = 1
         timeout_s = float(os.getenv("BINANCE_TIMEOUT", "4"))
 
-        for base in self.base_urls:
+        bases = list(self.base_urls)
+        if self.preferred_base and self.preferred_base in bases:
+            bases = [self.preferred_base] + [b for b in bases if b != self.preferred_base]
+
+        for base in bases:
             url = f"{base}{path}"
-            for proxy in proxy_candidates:
+            effective_proxies = proxy_candidates
+            if self.preferred_proxy:
+                effective_proxies = [self.preferred_proxy] + [p for p in proxy_candidates if p != self.preferred_proxy]
+
+            for proxy in effective_proxies:
                 proxies_dict = {"https": proxy, "http": proxy} if proxy else None
                 for attempt in range(max_attempts):
                     try:
@@ -117,8 +127,16 @@ class BinanceClient:
                         resp = self.session.get(url, params=params, timeout=timeout_s, proxies=proxies_dict)
                         if resp.status_code >= 400:
                             resp.raise_for_status()
+                        try:
+                            data = resp.json()
+                        except ValueError as exc_json:
+                            self._dbg(f"Invalid JSON from {url} proxy={proxy}: {exc_json}")
+                            raise
                         self._dbg(f"Success {url} via proxy={proxy}")
-                        return resp.json()
+                        if proxy:
+                            self.preferred_proxy = proxy
+                        self.preferred_base = base
+                        return data
                     except Exception as exc:  # pylint: disable=broad-except
                         last_error = exc
                         self._dbg(f"Error {url} attempt {attempt + 1} proxy={proxy}: {exc}")
