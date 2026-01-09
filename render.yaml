@@ -1,0 +1,16 @@
+services:
+  - type: cron
+    name: binance-ls-report
+    env: python
+    schedule: "0 6 * * *"   # 06:00 UTC = 09:00 Мск
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m src.main"
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: PAIRS
+        sync: false
+      - key: BINANCE_BASE_URLS
+        sync: false
