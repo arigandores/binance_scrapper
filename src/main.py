@@ -14,7 +14,10 @@ ProgressCb = Optional[Callable[[int, int, str, bool], None]]
 
 
 def collect_metrics(
-    client: BinanceClient, symbols: List[str], progress: ProgressCb = None
+    client: BinanceClient,
+    symbols: List[str],
+    progress: ProgressCb = None,
+    ticker_map: Optional[Dict[str, Dict[str, object]]] = None,
 ) -> Tuple[List[Dict[str, object]], List[str]]:
     results: List[Dict[str, object]] = []
     errors: List[str] = []
@@ -24,12 +27,16 @@ def collect_metrics(
             accounts = client.top_trader_accounts(symbol)
             positions = client.top_trader_positions(symbol)
             global_ratio = client.global_long_short(symbol)
+            ticker = ticker_map.get(symbol) if ticker_map else None
+            if not ticker:
+                ticker = client.ticker_24h(symbol)
             results.append(
                 {
                     "symbol": symbol,
                     "accounts": accounts,
                     "positions": positions,
                     "global": global_ratio,
+                    "ticker": ticker,
                 }
             )
             if progress:

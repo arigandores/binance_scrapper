@@ -291,3 +291,16 @@ class BinanceClient:
                 continue
         scored.sort(key=lambda x: x[1], reverse=True)
         return [s for s, _ in scored[:limit]]
+
+    def ticker_24h(self, symbol: str) -> Dict:
+        """Return 24h ticker for a symbol (price + change)."""
+        data = self._request("/fapi/v1/ticker/24hr", {"symbol": symbol})
+        try:
+            last_price = float(data["lastPrice"])
+            change_pct = float(data["priceChangePercent"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid ticker for {symbol}: {data}") from exc
+        return {
+            "last_price": last_price,
+            "change_pct": change_pct,
+        }

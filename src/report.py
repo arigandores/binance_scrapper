@@ -15,6 +15,25 @@ def _fmt_ratio(value: float) -> str:
     return f"{value:.2f}x"
 
 
+def _fmt_price(value: float) -> str:
+    if value >= 100:
+        return f"{value:.2f}"
+    if value >= 1:
+        return f"{value:.4f}"
+    return f"{value:.6f}"
+
+
+def _format_ticker(metric: Metric | None) -> str:
+    if not metric:
+        return "<b>Price</b>: n/a"
+    price = metric.get("last_price")
+    change = metric.get("change_pct")
+    if not isinstance(price, (int, float)) or not isinstance(change, (int, float)):
+        return "<b>Price</b>: n/a"
+    sign = "+" if change >= 0 else ""
+    return f"<b>Price</b>: {_fmt_price(price)} ({sign}{change:.2f}%)"
+
+
 def _imbalance_value(metric: Metric | None) -> float:
     """Return symmetric imbalance factor (>=1) or 0 if unavailable."""
     if not metric:
@@ -57,6 +76,7 @@ def build_message(run_dt: datetime, pairs: List[Dict[str, object]], errors: List
         lines.append("")
         symbol = str(item["symbol"])
         lines.append(f"<u><b>{symbol}</b></u>")
+        lines.append(f"• {_format_ticker(item.get('ticker'))}")
         lines.append(f"• {_format_metric('Accounts 1d', item.get('accounts'))}")  # Top Trader Accounts
         lines.append(f"• {_format_metric('Positions 1d', item.get('positions'))}")  # Top Trader Positions
         lines.append(f"• {_format_metric('Global 1d', item.get('global'))}")  # Global accounts

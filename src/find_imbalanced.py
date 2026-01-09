@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .binance_client import BinanceClient
 from .config_loader import load_settings
@@ -12,17 +12,43 @@ from .telegram_client import TelegramClient
 
 
 def find_top_imbalances(
-    client: BinanceClient, limit: int = 10, candidates: int = 120
+    client: BinanceClient,
+    limit: int = 10,
+    candidates: int = 120,
+    max_quote_volume: Optional[float] = None,
 ) -> Tuple[List[dict], List[dict], List[str]]:
     # Pre-filter by highest quoteVolume to avoid thousands of requests
-    symbols = client.list_top_volume_usdt_perpetual(limit=candidates)
-    print(f"[info] Candidates by volume: {len(symbols)}")
+    allowed = set(client.list_usdt_perpetual_symbols())
+    tickers = client.all_24h_tickers()
+    ticker_map: Dict[str, Dict[str, object]] = {}
+    scored: List[tuple[str, float]] = []
+    for t in tickers:
+        try:
+            symbol = str(t.get("symbol", ""))
+            if symbol not in allowed:
+                continue
+            vol = float(t.get("quoteVolume", 0.0))
+            if max_quote_volume is not None and vol > max_quote_volume:
+                continue
+            scored.append((symbol, vol))
+            # Cache ticker to avoid an extra request later
+            ticker_map[symbol] = {
+                "last_price": float(t.get("lastPrice", 0.0)),
+                "change_pct": float(t.get("priceChangePercent", 0.0)),
+            }
+        except Exception:
+            continue
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    symbols = [s for s, _ in scored[:candidates]]
+    volume_note = f" (max_quote_volume={max_quote_volume})" if max_quote_volume is not None else ""
+    print(f"[info] Candidates by volume: {len(symbols)}{volume_note}")
 
     def _progress(idx: int, total: int, symbol: str, is_error: bool) -> None:
         status = "error" if is_error else "ok"
         print(f"[progress] {idx}/{total} {symbol} {status}")
 
-    metrics, errors = collect_metrics(client, symbols, progress=_progress)
+    metrics, errors = collect_metrics(client, symbols, progress=_progress, ticker_map=ticker_map)
     sorted_pairs = sorted(metrics, key=_pair_max_imbalance, reverse=True)
     imbalanced = [m for m in sorted_pairs if _pair_max_imbalance(m) > HIGHLIGHT_THRESHOLD]
     return sorted_pairs[:limit], imbalanced, errors
@@ -49,11 +75,20 @@ def main() -> None:
         default=120,
         help="How many top-volume symbols to scan (reduces total requests)",
     )
+    parser.add_argument(
+        "--max-quote-volume",
+        type=float,
+        default=None,
+        help="Filter symbols with 24h quoteVolume <= this value (e.g. 10000000 for <$10m)",
+    )
     args = parser.parse_args()
 
     client = BinanceClient()
     top_pairs, imbalanced_pairs, errors = find_top_imbalances(
-        client, limit=args.limit, candidates=args.candidates
+        client,
+        limit=args.limit,
+        candidates=args.candidates,
+        max_quote_volume=args.max_quote_volume,
     )
 
     if errors:

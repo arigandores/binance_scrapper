@@ -1,0 +1,37 @@
+name: Daily Binance Imbalance Low-Volume Pre-Report
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # 05:00 Europe/Moscow (2h before imbalances.yml at 07:00)
+  workflow_dispatch: {}
+
+jobs:
+  run-imbalances-low-volume:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run imbalance finder (low volume, Telegram >2.3x only)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BINANCE_BASE_URLS: ${{ vars.BINANCE_BASE_URLS || secrets.BINANCE_BASE_URLS || vars.BINANCE_BASE_URL || secrets.BINANCE_BASE_URL }}
+          BINANCE_PROXY: ${{ secrets.BINANCE_PROXY || vars.BINANCE_PROXY }}
+          BINANCE_USE_FREE_PROXIES: ${{ vars.BINANCE_USE_FREE_PROXIES || secrets.BINANCE_USE_FREE_PROXIES }}
+          BINANCE_FREE_PROXY_LIMIT: ${{ vars.BINANCE_FREE_PROXY_LIMIT || secrets.BINANCE_FREE_PROXY_LIMIT }}
+          BINANCE_FREE_PROXY_TYPES: ${{ vars.BINANCE_FREE_PROXY_TYPES || secrets.BINANCE_FREE_PROXY_TYPES }}
+          BINANCE_FREE_PROXY_URL_BASE: ${{ vars.BINANCE_FREE_PROXY_URL_BASE || secrets.BINANCE_FREE_PROXY_URL_BASE }}
+          BINANCE_DEBUG: ${{ vars.BINANCE_DEBUG || secrets.BINANCE_DEBUG }}
+          BINANCE_TLS_INSECURE: ${{ vars.BINANCE_TLS_INSECURE || secrets.BINANCE_TLS_INSECURE }}
+        run: python -m src.find_imbalanced --candidates 80 --limit 20 --max-quote-volume 10000000
