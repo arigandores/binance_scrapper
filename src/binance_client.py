@@ -104,14 +104,17 @@ class BinanceClient:
         if self.free_proxies:
             proxy_candidates.extend(self.free_proxies)
 
+        max_attempts = 1
+        timeout_s = float(os.getenv("BINANCE_TIMEOUT", "4"))
+
         for base in self.base_urls:
             url = f"{base}{path}"
             for proxy in proxy_candidates:
                 proxies_dict = {"https": proxy, "http": proxy} if proxy else None
-                for attempt in range(3):
+                for attempt in range(max_attempts):
                     try:
                         self._dbg(f"GET {url} attempt {attempt + 1} proxy={proxy}")
-                        resp = self.session.get(url, params=params, timeout=10, proxies=proxies_dict)
+                        resp = self.session.get(url, params=params, timeout=timeout_s, proxies=proxies_dict)
                         if resp.status_code >= 400:
                             resp.raise_for_status()
                         self._dbg(f"Success {url} via proxy={proxy}")
@@ -119,7 +122,7 @@ class BinanceClient:
                     except Exception as exc:  # pylint: disable=broad-except
                         last_error = exc
                         self._dbg(f"Error {url} attempt {attempt + 1} proxy={proxy}: {exc}")
-                        time.sleep(1 + attempt)
+                        # single attempt; no backoff needed with max_attempts=1
         raise last_error  # type: ignore[misc]
 
     def _load_free_proxies(self, limit: int = 20, types: List[str] | None = None) -> List[str]:
