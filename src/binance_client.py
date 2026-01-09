@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-import re
-import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 BASE_URL = "https://fapi.binance.com"
-ALT_URL = "https://fapi.binance.me"  # часто работает при блоках
 
 
 def _build_base_urls(base_url: Optional[str]) -> List[str]:
@@ -19,7 +19,6 @@ def _build_base_urls(base_url: Optional[str]) -> List[str]:
         single = base_url or os.getenv("BINANCE_BASE_URL")
         urls = [single] if single else []
     urls.append(BASE_URL)
-    urls.append(ALT_URL)
     # preserve order, remove duplicates/empty
     seen = set()
     result = []
@@ -57,11 +56,13 @@ class BinanceClient:
             self.session.proxies.update({"https": proxy, "http": proxy})
             self._dbg(f"Using static proxy from env: {proxy}")
 
+        self._configure_retries()
+
         # Optional free proxy rotation (advanced.name public list)
         self.use_free_proxies = os.getenv("BINANCE_USE_FREE_PROXIES", "").lower() in ("1", "true", "yes")
         self.free_proxy_limit = int(os.getenv("BINANCE_FREE_PROXY_LIMIT", "20"))
         self.free_proxy_types = [
-            t.strip() for t in os.getenv("BINANCE_FREE_PROXY_TYPES", "https,http").split(",") if t.strip()
+            t.strip() for t in os.getenv("BINANCE_FREE_PROXY_TYPES", "https").split(",") if t.strip()
         ]
         self.free_proxies: List[str] = []
         self.preferred_proxy: Optional[str] = None
@@ -100,13 +101,36 @@ class BinanceClient:
         for key, value in browser_headers.items():
             self.session.headers.setdefault(key, value)
 
+    def _configure_retries(self) -> None:
+        """Configure HTTP retries for transient Binance/proxy hiccups."""
+        retry_total = int(os.getenv("BINANCE_HTTP_RETRIES", "2"))
+        if retry_total <= 0:
+            return
+
+        backoff = float(os.getenv("BINANCE_HTTP_BACKOFF", "0.5"))
+        status_forcelist = (429, 500, 502, 503, 504)
+        retry = Retry(
+            total=retry_total,
+            connect=retry_total,
+            read=retry_total,
+            status=retry_total,
+            backoff_factor=backoff,
+            status_forcelist=status_forcelist,
+            allowed_methods=frozenset(["HEAD", "GET", "OPTIONS"]),
+            respect_retry_after_header=True,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+        self._dbg(f"HTTP retries enabled: total={retry_total}, backoff={backoff}")
+
     def _request(self, path: str, params: Dict) -> Dict:
         last_error = None
         proxy_candidates: List[Optional[str]] = [None]
         if self.free_proxies:
             proxy_candidates.extend(self.free_proxies)
 
-        max_attempts = 1
+        max_attempts = max(1, int(os.getenv("BINANCE_MAX_ATTEMPTS", "1")))
         timeout_s = float(os.getenv("BINANCE_TIMEOUT", "4"))
 
         bases = list(self.base_urls)
@@ -138,10 +162,24 @@ class BinanceClient:
                         self.preferred_base = base
                         return data
                     except Exception as exc:  # pylint: disable=broad-except
-                        last_error = exc
+                        last_error = RuntimeError(f"{url} attempt {attempt + 1} proxy={proxy} failed: {exc}")
                         self._dbg(f"Error {url} attempt {attempt + 1} proxy={proxy}: {exc}")
-                        # single attempt; no backoff needed with max_attempts=1
+                        # retry/backoff handled by HTTPAdapter; loop moves to next proxy/base
         raise last_error  # type: ignore[misc]
+
+    def _proxy_test_url(self) -> str:
+        base = self.preferred_base or (self.base_urls[0] if self.base_urls else BASE_URL)
+        return f"{base}/fapi/v1/ping"
+
+    def _is_proxy_alive(self, proxy: str, timeout: float) -> bool:
+        test_url = self._proxy_test_url()
+        try:
+            resp = self.session.get(test_url, timeout=timeout, proxies={"https": proxy, "http": proxy})
+            resp.raise_for_status()
+            return True
+        except Exception as exc:  # pylint: disable=broad-except
+            self._dbg(f"Proxy check failed {proxy}: {exc}")
+            return False
 
     def _load_free_proxies(self, limit: int = 20, types: List[str] | None = None) -> List[str]:
         types = types or ["https"]
@@ -149,6 +187,11 @@ class BinanceClient:
             "http": "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/http.txt",
             "https": "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/https.txt",
         }
+        custom_proxy_url = os.getenv("BINANCE_FREE_PROXY_URL")
+        if custom_proxy_url:
+            sources["https"] = custom_proxy_url
+        validate = os.getenv("BINANCE_FREE_PROXY_VALIDATE", "1").lower() in ("1", "true", "yes")
+        validate_timeout = float(os.getenv("BINANCE_FREE_PROXY_VALIDATE_TIMEOUT", "1.5"))
         seen = set()
         proxies: List[str] = []
         for t in types:
@@ -169,7 +212,10 @@ class BinanceClient:
                 if p in seen:
                     continue
                 seen.add(p)
-                proxies.append(f"http://{p}")
+                proxy_url = f"http://{p}"
+                if validate and not self._is_proxy_alive(proxy_url, timeout=validate_timeout):
+                    continue
+                proxies.append(proxy_url)
                 if len(proxies) >= limit:
                     self._dbg(f"Collected proxy limit {len(proxies)}")
                     return proxies

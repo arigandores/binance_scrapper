@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from .binance_client import BinanceClient
 from .config_loader import load_settings
@@ -10,29 +10,37 @@ from .report import build_message
 from .telegram_client import TelegramClient
 
 
-def collect_metrics(client: BinanceClient, symbols: List[str]) -> List[Dict[str, object]]:
-    results = []
+def collect_metrics(client: BinanceClient, symbols: List[str]) -> Tuple[List[Dict[str, object]], List[str]]:
+    results: List[Dict[str, object]] = []
+    errors: List[str] = []
     for symbol in symbols:
-        accounts = client.top_trader_accounts(symbol)
-        positions = client.top_trader_positions(symbol)
-        global_ratio = client.global_long_short(symbol)
-        results.append(
-            {
-                "symbol": symbol,
-                "accounts": accounts,
-                "positions": positions,
-                "global": global_ratio,
-            }
-        )
-    return results
+        try:
+            accounts = client.top_trader_accounts(symbol)
+            positions = client.top_trader_positions(symbol)
+            global_ratio = client.global_long_short(symbol)
+            results.append(
+                {
+                    "symbol": symbol,
+                    "accounts": accounts,
+                    "positions": positions,
+                    "global": global_ratio,
+                }
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            errors.append(f"{symbol}: {exc}")
+    return results, errors
 
 
 def main() -> None:
     try:
         settings = load_settings()
         binance = BinanceClient()
-        metrics = collect_metrics(binance, settings["pairs"])
-        message = build_message(datetime.now(timezone.utc), metrics)
+        metrics, errors = collect_metrics(binance, settings["pairs"])
+        if not metrics:
+            raise RuntimeError(f"All symbol requests failed: {errors}")
+        if errors:
+            print("Partial errors:", *errors, sep="\n- ", file=sys.stderr)
+        message = build_message(datetime.now(timezone.utc), metrics, errors=errors)
 
         telegram = TelegramClient(settings["telegram_bot_token"])
         telegram.send_message(settings["telegram_chat_id"], message)

@@ -59,11 +59,17 @@ python -m src.main
 - `TELEGRAM_BOT_TOKEN` (обязательная)
 - `TELEGRAM_CHAT_ID` (обязательная, если не указана в config)
 - `PAIRS` (опционально, переопределяет пары из config)
-- `BINANCE_BASE_URLS` (опционально) — список через запятую для обхода 451, например: `https://fapi.binance.me,https://fapi.binance.com`. Можно задать одиночную `BINANCE_BASE_URL`.
+- `BINANCE_TIMEOUT` (опционально, по умолчанию `4` секунды)
+- `BINANCE_HTTP_RETRIES` / `BINANCE_HTTP_BACKOFF` (опционально, по умолчанию `2` и `0.5` соответственно) — управляют встроенным retry для временных ошибок/429
+- `BINANCE_MAX_ATTEMPTS` (опционально, по умолчанию `1`) — сколько раз пробовать один и тот же proxy/base поверх HTTP retry
+- `BINANCE_BASE_URLS` (опционально) — список через запятую для обхода 451, например: `https://fapi.binance.com`. Можно задать одиночную `BINANCE_BASE_URL`.
 - `BINANCE_PROXY` / `HTTPS_PROXY` (опционально) — HTTPS-прокси для обхода геоблоков. Формат: `http[s]://user:pass@host:port`.
-- `BINANCE_USE_FREE_PROXIES` (опционально) — если `true/1`, то скрипт подтянет список бесплатных HTTPS-прокси с `advanced.name` и будет перебирать их при запросах.
+- `BINANCE_USE_FREE_PROXIES` (опционально) — если `true/1`, то скрипт подтянет список бесплатных HTTPS-прокси (по умолчанию открытый список GitHub) и будет перебирать их при запросах.
+- `BINANCE_FREE_PROXY_TYPES` (опционально, по умолчанию `https`) — протоколы из списка (`https,http`) для подбора прокси.
 - `BINANCE_FREE_PROXY_LIMIT` (опционально, по умолчанию 20) — сколько прокси взять из списка.
-- `BINANCE_FREE_PROXY_URL` (опционально) — альтернативный URL со списком HTTPS-прокси (по умолчанию `https://advanced.name/ru/freeproxy?type=https`).
+- `BINANCE_FREE_PROXY_URL` (опционально) — альтернативный URL со списком HTTPS-прокси для протокола `https` (по умолчанию используется открытый список GitHub).
+- `BINANCE_FREE_PROXY_VALIDATE` (опционально, по умолчанию `true`) — проверять бесплатные прокси быстрым запросом `/fapi/v1/ping` перед использованием.
+- `BINANCE_FREE_PROXY_VALIDATE_TIMEOUT` (опционально, по умолчанию `1.5` сек) — таймаут проверки прокси.
 
 ## Отладка
 - Если запрос к Binance вернул пустой ответ, скрипт завершится с ошибкой.

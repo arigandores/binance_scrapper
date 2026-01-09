@@ -24,7 +24,7 @@ def _format_metric(label: str, metric: Metric | None) -> str:
     )
 
 
-def build_message(run_dt: datetime, pairs: List[Dict[str, object]]) -> str:
+def build_message(run_dt: datetime, pairs: List[Dict[str, object]], errors: List[str] | None = None) -> str:
     lines: List[str] = []
     utc_time = run_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines.append("Binance Futures Long/Short (1d)")
@@ -37,5 +37,11 @@ def build_message(run_dt: datetime, pairs: List[Dict[str, object]]) -> str:
         lines.append(_format_metric("Accounts 1d", item.get("accounts")))  # Top Trader Accounts
         lines.append(_format_metric("Positions 1d", item.get("positions")))  # Top Trader Positions
         lines.append(_format_metric("Global 1d", item.get("global")))  # Global accounts
+
+    if errors:
+        lines.append("")
+        lines.append("Warnings:")
+        for err in errors:
+            lines.append(f"- {err}")
 
     return "\n".join(lines)
