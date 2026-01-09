@@ -53,6 +53,8 @@ python -m src.main
 - Формирует сообщение с % long/short и отношением `longShortRatio`.
 - Отправляет текст через Telegram Bot API (`sendMessage`).
 
+Примечание: в GitHub Actions некоторые регионы могут получать 451 без `User-Agent`, он уже добавлен в код. При необходимости можно задать зеркальный `BINANCE_BASE_URL` через переменные окружения.
+
 ## Переменные окружения
 - `TELEGRAM_BOT_TOKEN` (обязательная)
 - `TELEGRAM_CHAT_ID` (обязательная, если не указана в config)

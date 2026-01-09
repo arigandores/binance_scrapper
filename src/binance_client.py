@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -9,15 +11,31 @@ BASE_URL = "https://fapi.binance.com"
 
 
 class BinanceClient:
-    def __init__(self, session: Optional[requests.Session] = None) -> None:
+    def __init__(self, session: Optional[requests.Session] = None, base_url: Optional[str] = None) -> None:
+        self.base_url = base_url or os.getenv("BINANCE_BASE_URL", BASE_URL)
         self.session = session or requests.Session()
+        # Binance may return 451 without a User-Agent from some clouds (e.g. GH Actions)
+        self.session.headers.setdefault("User-Agent", "binance-ls-reporter/1.0 (+https://github.com)")
+
+    def _request(self, path: str, params: Dict) -> Dict:
+        url = f"{self.base_url}{path}"
+        last_error = None
+        for attempt in range(3):
+            try:
+                resp = self.session.get(url, params=params, timeout=10)
+                if resp.status_code >= 400:
+                    resp.raise_for_status()
+                data = resp.json()
+                return data
+            except Exception as exc:  # pylint: disable=broad-except
+                last_error = exc
+                # small linear backoff
+                time.sleep(1 + attempt)
+        raise last_error  # type: ignore[misc]
 
     def _get_latest(self, path: str, symbol: str) -> Dict:
-        url = f"{BASE_URL}{path}"
         params = {"symbol": symbol, "period": "1d", "limit": 1}
-        resp = self.session.get(url, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
+        data = self._request(path, params)
         if not data:
             raise ValueError(f"No data returned for {symbol} at {path}")
         record = data[-1]
