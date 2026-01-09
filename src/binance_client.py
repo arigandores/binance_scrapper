@@ -36,6 +36,9 @@ class BinanceClient:
         self.base_urls = _build_base_urls(base_url)
         self.session = session or requests.Session()
 
+        # Debug flag
+        self.debug = os.getenv("BINANCE_DEBUG", "").lower() in ("1", "true", "yes")
+
         # Optional proxy (e.g., BINANCE_PROXY or HTTPS_PROXY). Using env allows GH Actions/secrets.
         proxy = (
             os.getenv("BINANCE_PROXY")
@@ -46,16 +49,22 @@ class BinanceClient:
         )
         if proxy:
             self.session.proxies.update({"https": proxy, "http": proxy})
+            self._dbg(f"Using static proxy from env: {proxy}")
 
         # Optional free proxy rotation (advanced.name public list)
         self.use_free_proxies = os.getenv("BINANCE_USE_FREE_PROXIES", "").lower() in ("1", "true", "yes")
         self.free_proxy_limit = int(os.getenv("BINANCE_FREE_PROXY_LIMIT", "20"))
+        self.free_proxy_types = [
+            t.strip() for t in os.getenv("BINANCE_FREE_PROXY_TYPES", "https,http").split(",") if t.strip()
+        ]
         self.free_proxies: List[str] = []
         if self.use_free_proxies:
             try:
-                self.free_proxies = self._load_free_proxies(limit=self.free_proxy_limit)
-            except Exception:
+                self.free_proxies = self._load_free_proxies(limit=self.free_proxy_limit, types=self.free_proxy_types)
+                self._dbg(f"Loaded {len(self.free_proxies)} free proxies")
+            except Exception as exc:
                 # Do not fail init on proxy list fetch errors; will continue without them
+                self._dbg(f"Failed to load free proxies: {exc}")
                 self.free_proxies = []
 
         # Mimic a real browser to reduce 451 blocks on some clouds
@@ -95,34 +104,48 @@ class BinanceClient:
                 proxies_dict = {"https": proxy, "http": proxy} if proxy else None
                 for attempt in range(3):
                     try:
+                        self._dbg(f"GET {url} attempt {attempt + 1} proxy={proxy}")
                         resp = self.session.get(url, params=params, timeout=10, proxies=proxies_dict)
                         if resp.status_code >= 400:
                             resp.raise_for_status()
+                        self._dbg(f"Success {url} via proxy={proxy}")
                         return resp.json()
                     except Exception as exc:  # pylint: disable=broad-except
                         last_error = exc
+                        self._dbg(f"Error {url} attempt {attempt + 1} proxy={proxy}: {exc}")
                         time.sleep(1 + attempt)
         raise last_error  # type: ignore[misc]
 
-    def _load_free_proxies(self, limit: int = 20) -> List[str]:
-        url = os.getenv(
-            "BINANCE_FREE_PROXY_URL",
-            "https://advanced.name/ru/freeproxy?type=https",
-        )
-        resp = self.session.get(url, timeout=10)
-        resp.raise_for_status()
-        # Extract IP:port via regex to avoid heavy HTML parsing
-        candidates = re.findall(r"(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}", resp.text)
+    def _load_free_proxies(self, limit: int = 20, types: List[str] | None = None) -> List[str]:
+        types = types or ["https"]
+        base_url = os.getenv("BINANCE_FREE_PROXY_URL_BASE", "https://advanced.name/ru/freeproxy")
         seen = set()
         proxies: List[str] = []
-        for p in candidates:
-            if p in seen:
+        for t in types:
+            url = f"{base_url}?type={t}"
+            try:
+                self._dbg(f"Fetch proxy list: {url}")
+                resp = self.session.get(url, timeout=10)
+                resp.raise_for_status()
+            except Exception as exc:
+                self._dbg(f"Proxy list fetch failed {url}: {exc}")
                 continue
-            seen.add(p)
-            proxies.append(f"http://{p}")
-            if len(proxies) >= limit:
-                break
+            candidates = re.findall(r"(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}", resp.text)
+            self._dbg(f"Found {len(candidates)} raw proxies for type={t}")
+            for p in candidates:
+                if p in seen:
+                    continue
+                seen.add(p)
+                # use http schema for both, requests handles CONNECT for https targets
+                proxies.append(f"http://{p}")
+                if len(proxies) >= limit:
+                    self._dbg(f"Collected proxy limit {len(proxies)}")
+                    return proxies
         return proxies
+
+    def _dbg(self, msg: str) -> None:
+        if self.debug:
+            print(f"[DEBUG][BinanceClient] {msg}")
 
     def _get_latest(self, path: str, symbol: str) -> Dict:
         params = {"symbol": symbol, "period": "1d", "limit": 1}
