@@ -34,4 +34,5 @@ jobs:
           BINANCE_FREE_PROXY_TYPES: ${{ vars.BINANCE_FREE_PROXY_TYPES || secrets.BINANCE_FREE_PROXY_TYPES }}
           BINANCE_FREE_PROXY_URL_BASE: ${{ vars.BINANCE_FREE_PROXY_URL_BASE || secrets.BINANCE_FREE_PROXY_URL_BASE }}
           BINANCE_DEBUG: ${{ vars.BINANCE_DEBUG || secrets.BINANCE_DEBUG }}
+          BINANCE_TLS_INSECURE: ${{ vars.BINANCE_TLS_INSECURE || secrets.BINANCE_TLS_INSECURE }}
         run: python -m src.main
