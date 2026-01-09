@@ -60,6 +60,10 @@ python -m src.main
 - `TELEGRAM_CHAT_ID` (обязательная, если не указана в config)
 - `PAIRS` (опционально, переопределяет пары из config)
 - `BINANCE_BASE_URLS` (опционально) — список через запятую для обхода 451, например: `https://fapi.binance.me,https://fapi.binance.com`. Можно задать одиночную `BINANCE_BASE_URL`.
+- `BINANCE_PROXY` / `HTTPS_PROXY` (опционально) — HTTPS-прокси для обхода геоблоков. Формат: `http[s]://user:pass@host:port`.
+- `BINANCE_USE_FREE_PROXIES` (опционально) — если `true/1`, то скрипт подтянет список бесплатных HTTPS-прокси с `advanced.name` и будет перебирать их при запросах.
+- `BINANCE_FREE_PROXY_LIMIT` (опционально, по умолчанию 20) — сколько прокси взять из списка.
+- `BINANCE_FREE_PROXY_URL` (опционально) — альтернативный URL со списком HTTPS-прокси (по умолчанию `https://advanced.name/ru/freeproxy?type=https`).
 
 ## Отладка
 - Если запрос к Binance вернул пустой ответ, скрипт завершится с ошибкой.

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
-
 import requests
 
 BASE_URL = "https://fapi.binance.com"
@@ -35,6 +35,29 @@ class BinanceClient:
     def __init__(self, session: Optional[requests.Session] = None, base_url: Optional[str] = None) -> None:
         self.base_urls = _build_base_urls(base_url)
         self.session = session or requests.Session()
+
+        # Optional proxy (e.g., BINANCE_PROXY or HTTPS_PROXY). Using env allows GH Actions/secrets.
+        proxy = (
+            os.getenv("BINANCE_PROXY")
+            or os.getenv("HTTPS_PROXY")
+            or os.getenv("https_proxy")
+            or os.getenv("HTTP_PROXY")
+            or os.getenv("http_proxy")
+        )
+        if proxy:
+            self.session.proxies.update({"https": proxy, "http": proxy})
+
+        # Optional free proxy rotation (advanced.name public list)
+        self.use_free_proxies = os.getenv("BINANCE_USE_FREE_PROXIES", "").lower() in ("1", "true", "yes")
+        self.free_proxy_limit = int(os.getenv("BINANCE_FREE_PROXY_LIMIT", "20"))
+        self.free_proxies: List[str] = []
+        if self.use_free_proxies:
+            try:
+                self.free_proxies = self._load_free_proxies(limit=self.free_proxy_limit)
+            except Exception:
+                # Do not fail init on proxy list fetch errors; will continue without them
+                self.free_proxies = []
+
         # Mimic a real browser to reduce 451 blocks on some clouds
         browser_headers = {
             "User-Agent": (
@@ -62,18 +85,44 @@ class BinanceClient:
 
     def _request(self, path: str, params: Dict) -> Dict:
         last_error = None
+        proxy_candidates: List[Optional[str]] = [None]
+        if self.free_proxies:
+            proxy_candidates.extend(self.free_proxies)
+
         for base in self.base_urls:
             url = f"{base}{path}"
-            for attempt in range(3):
-                try:
-                    resp = self.session.get(url, params=params, timeout=10)
-                    if resp.status_code >= 400:
-                        resp.raise_for_status()
-                    return resp.json()
-                except Exception as exc:  # pylint: disable=broad-except
-                    last_error = exc
-                    time.sleep(1 + attempt)
+            for proxy in proxy_candidates:
+                proxies_dict = {"https": proxy, "http": proxy} if proxy else None
+                for attempt in range(3):
+                    try:
+                        resp = self.session.get(url, params=params, timeout=10, proxies=proxies_dict)
+                        if resp.status_code >= 400:
+                            resp.raise_for_status()
+                        return resp.json()
+                    except Exception as exc:  # pylint: disable=broad-except
+                        last_error = exc
+                        time.sleep(1 + attempt)
         raise last_error  # type: ignore[misc]
+
+    def _load_free_proxies(self, limit: int = 20) -> List[str]:
+        url = os.getenv(
+            "BINANCE_FREE_PROXY_URL",
+            "https://advanced.name/ru/freeproxy?type=https",
+        )
+        resp = self.session.get(url, timeout=10)
+        resp.raise_for_status()
+        # Extract IP:port via regex to avoid heavy HTML parsing
+        candidates = re.findall(r"(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}", resp.text)
+        seen = set()
+        proxies: List[str] = []
+        for p in candidates:
+            if p in seen:
+                continue
+            seen.add(p)
+            proxies.append(f"http://{p}")
+            if len(proxies) >= limit:
+                break
+        return proxies
 
     def _get_latest(self, path: str, symbol: str) -> Dict:
         params = {"symbol": symbol, "period": "1d", "limit": 1}
